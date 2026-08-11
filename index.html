@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voting DApp</title>
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.5.3/dist/ethers.umd.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/@metamask/detect-provider@1.2.0/dist/detect-provider.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.8.1/dist/cdn.min.js" defer></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }
+        .card { border: 1px solid #ccc; padding: 15px; border-radius: 8px; margin-bottom: 15px; max-width: 500px; }
+        button { cursor: pointer; padding: 6px 12px; margin-top: 5px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+    </style>
+</head>
+<body>
+
+<script>
+    window.abi = {
+        Voting: [
+            {
+                "inputs": [
+                    {
+                        "internalType": "string[]",
+                        "name": "candidateNames",
+                        "type": "string[]"
+                    }
+                ],
+                "stateMutability": "nonpayable",
+                "type": "constructor"
+            },
+            {
+                "inputs": [],
+                "name": "candidateCount",
+                "outputs": [
+                    {
+                        "internalType": "uint256",
+                        "name": "",
+                        "type": "uint256"
+                    }
+                ],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [
+                    {
+                        "internalType": "uint256",
+                        "name": "",
+                        "type": "uint256"
+                    }
+                ],
+                "name": "candidateList",
+                "outputs": [
+                    {
+                        "internalType": "string",
+                        "name": "",
+                        "type": "string"
+                    }
+                ],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [],
+                "name": "endVote",
+                "outputs": [],
+                "stateMutability": "nonpayable",
+                "type": "function"
+            },
+            {
+                "inputs": [],
+                "name": "startVote",
+                "outputs": [],
+                "stateMutability": "nonpayable",
+                "type": "function"
+            },
+            {
+                "inputs": [],
+                "name": "state",
+                "outputs": [
+                    {
+                        "internalType": "enum Voting.State",
+                        "name": "",
+                        "type": "uint8"
+                    }
+                ],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [
+                    {
+                        "internalType": "string",
+                        "name": "candidate",
+                        "type": "string"
+                    }
+                ],
+                "name": "totalVotesFor",
+                "outputs": [
+                    {
+                        "internalType": "uint256",
+                        "name": "",
+                        "type": "uint256"
+                    }
+                ],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [
+                    {
+                        "internalType": "string",
+                        "name": "candidate",
+                        "type": "string"
+                    }
+                ],
+                "name": "voteForCandidate",
+                "outputs": [],
+                "stateMutability": "nonpayable",
+                "type": "function"  
+            }
+        ]
+    }
+</script>
+
+<div x-data="{
+    isConnected: false,
+    ethereum: null,
+    account: '',
+    contractAddress: '0x54bfDf94bF8cBf5814a801817636C6F838b555dE',
+    candidates: [],
+    votingState: 0,
+    loading: false,
+
+    async init() {
+        this.ethereum = await detectEthereumProvider()
+        if (!this.ethereum) {
+            alert('กรุณาติดตั้ง MetaMask!')
+            return
+        }
+        window.provider = new ethers.providers.Web3Provider(this.ethereum)
+        
+        const detectAccount = async () => {
+            try {
+                await this.ethereum.request({
+                    method: 'wallet_switchEthereumChain',
+                    params: [{ chainId: '0xAA36A7' }] // Sepolia Network
+                });
+            } catch (error) {
+                console.log('Network switch failed:', error)
+            }
+            const accounts = await this.ethereum.request({ method: 'eth_accounts' })
+            if (accounts.length === 0) {
+                this.isConnected = false
+                return
+            }
+            this.account = accounts[0]
+            this.isConnected = true
+            this.loadVotingData()
+        }
+
+        detectAccount()
+        this.ethereum.on('accountsChanged', () => detectAccount())
+        setInterval(() => { if (this.isConnected) this.loadVotingData() }, 5000)
+    },
+
+    async connect() {
+        await this.ethereum.request({ method: 'eth_requestAccounts' })
+    },
+
+    async loadVotingData() {
+        if (!this.contractAddress || this.contractAddress === '0x...') return
+        try {
+            const contract = new ethers.Contract(this.contractAddress, window.abi.Voting, window.provider)
+            
+            this.votingState = await contract.state()
+
+            const count = await contract.candidateCount()
+            let tempCandidates = []
+
+            for (let i = 0; i < count; i++) {
+                const name = await contract.candidateList(i)
+                let votes = '(ดูได้หลังปิดโหวต)'
+
+                if (this.votingState === 2) {
+                    try {
+                        const voteCount = await contract.totalVotesFor(name)
+                        votes = voteCount.toString()
+                    } catch (e) {
+                        votes = '0'
+                    }
+                }
+
+                tempCandidates.push({ name: name, votes: votes })
+            }
+            this.candidates = tempCandidates
+        } catch (error) {
+            console.error('Error loading contract data:', error)
+        }
+    },
+
+    async vote(candidateName) {
+        try {
+            this.loading = true
+            const contract = new ethers.Contract(this.contractAddress, window.abi.Voting, window.provider)
+            const tx = await contract.connect(window.provider.getSigner()).voteForCandidate(candidateName)
+            await tx.wait()
+            alert('โหวตสำเร็จ!')
+            this.loadVotingData()
+        } catch (error) {
+            console.error(error)
+            alert('เกิดข้อผิดพลาดในการโหวต: ' + (error.reason || error.message))
+        } finally {
+            this.loading = false
+        }
+    },
+
+    async startVoting() {
+        try {
+            this.loading = true
+            const contract = new ethers.Contract(this.contractAddress, window.abi.Voting, window.provider)
+            const tx = await contract.connect(window.provider.getSigner()).startVote()
+            await tx.wait()
+            this.loadVotingData()
+        } catch (error) {
+            alert('เกิดข้อผิดพลาดในการเริ่มโหวต: ' + (error.reason || error.message))
+        } finally {
+            this.loading = false
+        }
+    },
+
+    async endVoting() {
+        try {
+            this.loading = true
+            const contract = new ethers.Contract(this.contractAddress, window.abi.Voting, window.provider)
+            const tx = await contract.connect(window.provider.getSigner()).endVote()
+            await tx.wait()
+            this.loadVotingData()
+        } catch (error) {
+            alert('เกิดข้อผิดพลาดในการปิดโหวต: ' + (error.reason || error.message))
+        } finally {
+            this.loading = false
+        }
+    }
+}">
+
+    <h2>Voting DApp</h2>
+
+    <button x-show="!isConnected" @click="connect">Connect Wallet</button>
+
+    <div x-show="isConnected">
+        <div class="card">
+            <p><strong>Account:</strong> <span x-text="account"></span></p>
+            <p><strong>Contract Address:</strong> <span x-text="contractAddress"></span></p>
+            <p><strong>Status:</strong> 
+                <span x-text="votingState == 0 ? '🟡 ยังไม่เริ่มโหวต' : (votingState == 1 ? '🟢 กำลังเปิดให้โหวต' : '🔴 ปิดการโหวตแล้ว')"></span>
+            </p>
+            
+            <div>
+                <button @click="startVoting" :disabled="loading" x-show="votingState == 0">Start Voting</button>
+                <button @click="endVoting" :disabled="loading" x-show="votingState == 1">End Voting</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>รายชื่อผู้ลงสมัครรับเลือกตั้ง</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ชื่อผู้สมัคร</th>
+                        <th>คะแนนโหวต</th>
+                        <th>การกระทำ</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="candidate in candidates" :key="candidate.name">
+                        <tr>
+                            <td x-text="candidate.name"></td>
+                            <td x-text="candidate.votes"></td>
+                            <td>
+                                <button @click="vote(candidate.name)" :disabled="votingState != 1 || loading">
+                                    Vote
+                                </button>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+</body>
+</html>
